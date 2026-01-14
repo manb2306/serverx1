@@ -1,0 +1,6 @@
+{
+  "type": "module",
+  "dependencies": {
+    "haxball.js": "^4.0.1"
+  }
+}
