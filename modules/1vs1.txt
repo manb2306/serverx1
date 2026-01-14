@@ -1,0 +1,103 @@
+export default ({ room, log }) => {
+  // 🔒 Bloquear equipos desde el inicio
+  room.setTeamsLock(true);
+
+  const MAP_PRACTICE = "x0.hbs";
+  const MAP_DUEL = "x1.hbs";
+
+  const playersNoHost = () => room.getPlayerList().filter(p => p.id !== 0);
+  const activePlayers = () => playersNoHost().filter(p => p.team === 1 || p.team === 2);
+  const spectators = () => playersNoHost().filter(p => p.team === 0);
+
+  const startPractice = (singleId) => {
+    room.stopGame();
+    room.setCustomStadium(room.maps[MAP_PRACTICE]);
+    room.setPlayerTeam(singleId, 1);
+    for (const p of playersNoHost()) {
+      if (p.id !== singleId) room.setPlayerTeam(p.id, 0);
+    }
+    room.startGame();
+    //log?.("Practice mode (x0)");
+  };
+
+  const startDuel = () => {
+    room.stopGame();
+    room.setCustomStadium(room.maps[MAP_DUEL]);
+    room.startGame();
+    //log?.("Duel mode (x1)");
+  };
+
+  const normalizeToDuel = () => {
+    const ordered = playersNoHost().slice().sort((a, b) => a.id - b.id);
+    if (ordered[0]) room.setPlayerTeam(ordered[0].id, 1);
+    if (ordered[1]) room.setPlayerTeam(ordered[1].id, 2);
+    for (let i = 2; i < ordered.length; i++) room.setPlayerTeam(ordered[i].id, 0);
+  };
+
+  const distributeAfterMatch = (winnerTeam) => {
+    const act = activePlayers();
+    const winner = act.find(p => p.team === winnerTeam);
+    const loser = act.find(p => p.team !== winnerTeam);
+
+    if (winner) room.setPlayerTeam(winner.id, 1); // ganador → Red
+    if (loser) room.setPlayerTeam(loser.id, 0);   // perdedor → espectador
+
+    const specList = spectators();
+    if (specList.length > 0) {
+      room.setPlayerTeam(specList[0].id, 2);      // siguiente espectador → Blue
+    } else if (loser) {
+      room.setPlayerTeam(loser.id, 2);            // sin espectadores, perdedor vuelve como Blue
+    }
+
+    startDuel();
+  };
+
+  room.onPlayerJoin = (player) => {
+    const list = playersNoHost();
+    if (list.length === 1) {
+      startPractice(player.id);
+    } else if (list.length === 2) {
+      normalizeToDuel();
+      startDuel();
+    } else {
+      room.setPlayerTeam(player.id, 0);
+      // extra entra como espectador, sin reiniciar
+    }
+  };
+
+  room.onPlayerLeave = (player) => {
+    // Si se va un espectador, no hacer nada
+    if (player.team === 0) return;
+
+    const act = activePlayers();
+
+    if (act.length === 0) {
+      room.stopGame();
+      return;
+    }
+
+    if (act.length === 1) {
+      // Quedó uno solo activo → intentar mantener duelo promoviendo espectador
+      const specList = spectators();
+      if (specList.length > 0) {
+        room.setPlayerTeam(specList[0].id, 2); // espectador entra como Blue
+        // Asegurar que el activo quede en Red
+        room.setPlayerTeam(act[0].id, 1);
+        startDuel();
+      } else {
+        // Sin espectadores → práctica
+        startPractice(act[0].id);
+      }
+      return;
+    }
+
+    // Siguen 2 o más activos → mantener duelo sin reiniciar, solo normalizar equipos
+    normalizeToDuel();
+    // No restart here
+  };
+
+  room.onTeamVictory = (scores) => {
+    const winnerTeam = scores.red > scores.blue ? 1 : 2;
+    distributeAfterMatch(winnerTeam);
+  };
+};
