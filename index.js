@@ -16,12 +16,37 @@ HaxballJS().then((HBInit) => {
     public: config.public,
     token: config.token,
     geo: config.geo,
-    password: config.password
+    password: config.password,
+    noPlayer: true // importante en headless
   });
 
   room.onRoomLink = (link) => {
     console.log("✅ Room started at:", link);
   };
+
+  // --- Dispatcher universal ---
+  const handlers = {
+    onPlayerChat: [],
+    onPlayerJoin: [],
+    onPlayerLeave: [],
+    onTeamVictory: []
+  };
+
+  const register = (event, fn) => {
+    if (handlers[event]) handlers[event].push(fn);
+  };
+
+  // Encadenar handlers
+  room.onPlayerChat = (player, msg) => {
+    for (const fn of handlers.onPlayerChat) {
+      const res = fn(player, msg);
+      if (res === false) return false; // bloquea mensaje si algún módulo lo pide
+    }
+    return true;
+  };
+  room.onPlayerJoin = (player) => handlers.onPlayerJoin.forEach(fn => fn(player));
+  room.onPlayerLeave = (player) => handlers.onPlayerLeave.forEach(fn => fn(player));
+  room.onTeamVictory = (scores) => handlers.onTeamVictory.forEach(fn => fn(scores));
 
   // --- Auto-load modules from /modules ---
   const modulesPath = path.join(__dirname, "modules");
@@ -36,6 +61,7 @@ HaxballJS().then((HBInit) => {
         if (typeof mod.default === "function") {
           const sandbox = {
             room,
+            register,
             name: file,
             log: (...args) => console.log(`[${file}]`, ...args)
           };
